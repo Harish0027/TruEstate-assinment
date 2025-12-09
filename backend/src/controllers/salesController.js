@@ -86,7 +86,7 @@ exports.getSales = async (req, res, next) => {
       SalesModel.countDocuments(filters),
       SalesModel.find(filters).sort(sortOption).skip(skip).limit(limitNum),
     ]);
-
+    console.log(items);
     res.status(200).json({
       page: pageNum,
       limit: limitNum,

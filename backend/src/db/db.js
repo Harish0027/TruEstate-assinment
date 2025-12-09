@@ -1,8 +1,7 @@
 const { MongoClient } = require("mongodb");
 
 const uri =
-  process.env.MONGO_URI ||
-  "mongodb+srv://sutarharish143_db_user:harshu01@cluster0.rxqgbmc.mongodb.net/?appName=Cluster0";
+  "mongodb+srv://sutarharish143_db_user:harshu01@cluster0.rxqgbmc.mongodb.net/?appName=Cluster0/truestate";
 
 let client;
 let db;
