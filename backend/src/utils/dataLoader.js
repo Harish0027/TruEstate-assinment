@@ -26,7 +26,7 @@ const MONGO_URI =
   "mongodb+srv://sutarharish143_db_user:harshu01@cluster0.rxqgbmc.mongodb.net/truestate?retryWrites=true&w=majority";
 
 mongoose
-  .connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+  .connect(MONGO_URI)
   .then(() => console.log("MongoDB connected"))
   .catch((err) => console.error("MongoDB connection error:", err));
 
