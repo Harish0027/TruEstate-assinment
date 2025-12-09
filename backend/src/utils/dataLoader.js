@@ -84,14 +84,14 @@ async function loadData() {
   });
 }
 
-loadData()
-  .then(() => {
-    console.log("✔ Data import complete");
-    mongoose.disconnect();
-  })
-  .catch((err) => {
-    console.error(" Error loading data:", err);
-    mongoose.disconnect();
-  });
+// loadData()
+//   .then(() => {
+//     console.log("✔ Data import complete");
+//     mongoose.disconnect();
+//   })
+//   .catch((err) => {
+//     console.error(" Error loading data:", err);
+//     mongoose.disconnect();
+//   });
 
 module.exports = SalesModel;
