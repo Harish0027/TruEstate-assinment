@@ -8,20 +8,15 @@ const PORT = process.env.PORT || 4000;
 app.use(cors());
 app.use(express.json());
 
-app.get("/health", (req, res) => {
-  res.status(200).json({ status: "ok" });
-});
+app.get("/health", (_req, res) => res.json({ status: "ok" }));
 
 app.use("/api/sales", salesRouter);
 
 app.use((err, req, res, next) => {
-  // Centralized error handler keeps API responses consistent.
   console.error(err);
-  res.status(err.status || 500).json({
-    message: err.message || "Unexpected server error",
-  });
+  res
+    .status(err.status || 500)
+    .json({ message: err.message || "Server Error" });
 });
 
-app.listen(PORT, () => {
-  console.log(`Retail Sales API listening on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`API running on port ${PORT}`));

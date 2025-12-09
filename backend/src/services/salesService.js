@@ -1,279 +1,170 @@
-const { getSalesStore } = require("../utils/dataLoader");
-
 const SORT_KEYS = new Set(["date", "quantity", "customerName"]);
 
 const normalizeSort = ({ by, order } = {}) => {
-  const normalizedBy = SORT_KEYS.has(by) ? by : "date";
-  const normalizedOrder = order === "asc" ? "asc" : "desc";
-  return { by: normalizedBy, order: normalizedOrder };
+  const byKey = SORT_KEYS.has(by) ? by : "date";
+  const ord = order === "asc" ? "asc" : "desc";
+  return { by: byKey, order: ord };
 };
 
-const safePagination = (pagination = {}) => {
-  const page =
-    Number.isInteger(pagination.page) && pagination.page > 0
-      ? pagination.page
-      : 1;
-  const limit =
-    Number.isInteger(pagination.limit) && pagination.limit > 0
-      ? pagination.limit
-      : 10;
-  return { page, limit };
-};
+const safePagination = ({ page, limit } = {}) => ({
+  page: Number(page) > 0 ? Number(page) : 1,
+  limit: Number(limit) > 0 ? Number(limit) : 10,
+});
 
-const unionFromIndex = (map, values = []) => {
-  if (!values || values.length === 0) return null;
-  const set = new Set();
-  values.forEach((value) => {
-    const indices = map.get(value);
-    if (indices) {
-      indices.forEach((index) => set.add(index));
-    }
-  });
-  return set;
-};
+const unionFromIndex = (map, values) => {
+  if (!values?.length) return null;
 
-const intersectSets = (a, b) => {
-  if (!a || a.size === 0 || !b || b.size === 0) {
-    return new Set();
-  }
-
-  const [small, large] = a.size <= b.size ? [a, b] : [b, a];
   const result = new Set();
-  small.forEach((value) => {
-    if (large.has(value)) {
-      result.add(value);
-    }
+  values.forEach((v) => {
+    const arr = map.get(v);
+    if (arr) arr.forEach((i) => result.add(i));
   });
-  return result;
-};
-
-const combineWithIntersection = (base, next) => {
-  if (!next) return base;
-  if (!base) return next;
-  return intersectSets(base, next);
-};
-
-const buildTagsIntersection = (indexMap, tags = []) => {
-  if (!tags || tags.length === 0) {
-    return null;
-  }
-
-  const tagArrays = tags
-    .map((tag) => indexMap.get(tag))
-    .filter((entry) => Array.isArray(entry));
-
-  if (tagArrays.length !== tags.length) {
-    return new Set();
-  }
-
-  tagArrays.sort((a, b) => a.length - b.length);
-  let intersection = new Set(tagArrays[0]);
-
-  for (let idx = 1; idx < tagArrays.length && intersection.size > 0; idx += 1) {
-    const nextArray = tagArrays[idx];
-    const nextSet = new Set();
-    nextArray.forEach((candidate) => {
-      if (intersection.has(candidate)) {
-        nextSet.add(candidate);
-      }
-    });
-    intersection = nextSet;
-  }
-
-  return intersection;
-};
-
-const buildCandidateSet = (filters = {}, indexes) => {
-  let result = null;
-
-  result = combineWithIntersection(
-    result,
-    unionFromIndex(indexes.region, filters.regions)
-  );
-  result = combineWithIntersection(
-    result,
-    unionFromIndex(indexes.gender, filters.genders)
-  );
-  result = combineWithIntersection(
-    result,
-    unionFromIndex(indexes.productCategory, filters.productCategories)
-  );
-  result = combineWithIntersection(
-    result,
-    unionFromIndex(indexes.paymentMethod, filters.paymentMethods)
-  );
-  result = combineWithIntersection(
-    result,
-    buildTagsIntersection(indexes.tags, filters.tags)
-  );
 
   return result;
 };
 
-const needsPostFilters = (filters = {}, searchTerm) => {
-  const trimmedSearch = searchTerm ? searchTerm.trim() : "";
-  if (trimmedSearch.length > 0) {
-    return true;
-  }
-
-  const hasAgeMin = typeof filters.age?.min === "number";
-  const hasAgeMax = typeof filters.age?.max === "number";
-  if (hasAgeMin || hasAgeMax) {
-    return true;
-  }
-
-  const hasDateFrom = filters.dateRange?.from instanceof Date;
-  const hasDateTo = filters.dateRange?.to instanceof Date;
-  return hasDateFrom || hasDateTo;
+const intersect = (a, b) => {
+  if (!a) return b;
+  if (!b) return a;
+  const out = new Set();
+  a.forEach((x) => b.has(x) && out.add(x));
+  return out;
 };
 
-const matchesAgeRange = (value, range = {}) => {
-  if (typeof value !== "number") {
-    return false;
-  }
+const needsPostFilters = (filters, search) => {
+  if (search?.trim()) return true;
+  if (filters.age?.min || filters.age?.max) return true;
+  if (filters.dateRange?.from || filters.dateRange?.to) return true;
+  return false;
+};
 
-  if (typeof range.min === "number" && value < range.min) {
-    return false;
-  }
-  if (typeof range.max === "number" && value > range.max) {
-    return false;
-  }
+const matchesAge = (age, range) => {
+  if (range.min && age < range.min) return false;
+  if (range.max && age > range.max) return false;
   return true;
 };
 
-const matchesDateRange = (dateValue, range = {}) => {
-  if (!range.from && !range.to) {
-    return true;
-  }
-  if (typeof dateValue !== "number") {
-    return false;
-  }
-  if (range.from && dateValue < range.from.getTime()) {
-    return false;
-  }
-  if (range.to && dateValue > range.to.getTime()) {
-    return false;
-  }
+const matchesDate = (value, range) => {
+  if (range.from && value < range.from.getTime()) return false;
+  if (range.to && value > range.to.getTime()) return false;
   return true;
 };
 
-const recordPassesPostFilters = (entry, searchLower, phoneQuery, filters) => {
-  const hasSearch = Boolean(searchLower);
-
-  if (hasSearch) {
-    const nameMatches = entry.__customerNameLower.includes(searchLower);
-    const phoneMatches = entry.__phoneNormalized.includes(phoneQuery);
-    if (!nameMatches && !phoneMatches) {
+const recordMatchesPostFilter = (rec, searchLower, phoneQuery, filters) => {
+  if (searchLower) {
+    if (
+      !rec.CustomerNameLower.includes(searchLower) &&
+      !rec.PhoneNormalized.includes(phoneQuery)
+    )
       return false;
-    }
   }
 
-  if (
-    (typeof filters.age?.min === "number" ||
-      typeof filters.age?.max === "number") &&
-    !matchesAgeRange(entry.Age, filters.age)
-  ) {
+  if ((filters.age.min || filters.age.max) && !matchesAge(rec.Age, filters.age))
     return false;
-  }
 
-  if (!matchesDateRange(entry.__dateValue, filters.dateRange)) {
-    return false;
-  }
+  if (!matchesDate(rec.DateValue, filters.dateRange)) return false;
 
   return true;
 };
 
-const sliceByIndices = (indices, dataset, offset, limit) => {
-  const selection = indices.slice(offset, offset + limit);
-  return selection.map((index) => dataset[index]);
+const sliceByIndices = (sorted, dataset, offset, limit) => {
+  return sorted.slice(offset, offset + limit).map((i) => dataset[i]);
 };
 
-const getSales = ({ searchTerm, filters = {}, sort, pagination }) => {
-  const { dataset, indexes, sorts, positions } = getSalesStore();
+function getSales({
+  searchTerm,
+  filters,
+  sort,
+  pagination,
+  dataset,
+  indexes,
+  sorts,
+  positions,
+}) {
   const { page, limit } = safePagination(pagination);
   const offset = (page - 1) * limit;
 
-  const normalizedSort = normalizeSort(sort || {});
+  const normalizedSort = normalizeSort(sort);
   const sortKey = `${normalizedSort.by}:${normalizedSort.order}`;
+
   const sortedIndices = sorts[sortKey] || sorts["date:desc"];
   const positionLookup = positions[sortKey] || positions["date:desc"];
 
-  const candidateSet = buildCandidateSet(filters, indexes);
-  const requiresPostFiltering = needsPostFilters(filters, searchTerm);
+  // Build candidate set
+  let candidate = null;
+  candidate = intersect(
+    candidate,
+    unionFromIndex(indexes.region, filters.regions)
+  );
+  candidate = intersect(
+    candidate,
+    unionFromIndex(indexes.gender, filters.genders)
+  );
+  candidate = intersect(
+    candidate,
+    unionFromIndex(indexes.productCategory, filters.productCategories)
+  );
+  candidate = intersect(
+    candidate,
+    unionFromIndex(indexes.paymentMethod, filters.paymentMethods)
+  );
+  candidate = intersect(candidate, unionFromIndex(indexes.tags, filters.tags));
 
-  if (!requiresPostFiltering) {
-    if (!candidateSet) {
+  const requiresPost = needsPostFilters(filters, searchTerm);
+
+  if (!requiresPost) {
+    if (!candidate) {
       const total = dataset.length;
       const items = sliceByIndices(sortedIndices, dataset, offset, limit);
       return {
         page,
         limit,
         total,
-        totalPages: Math.max(1, Math.ceil(total / limit)),
+        totalPages: Math.ceil(total / limit),
         items,
       };
     }
-
-    const orderedCandidates = Array.from(candidateSet).sort(
+    const ordered = [...candidate].sort(
       (a, b) => positionLookup[a] - positionLookup[b]
     );
-    const total = orderedCandidates.length;
-    const items = sliceByIndices(orderedCandidates, dataset, offset, limit);
-
-    return {
-      page,
-      limit,
-      total,
-      totalPages: Math.max(1, Math.ceil(total / limit)),
-      items,
-    };
+    const total = ordered.length;
+    const items = sliceByIndices(ordered, dataset, offset, limit);
+    return { page, limit, total, totalPages: Math.ceil(total / limit), items };
   }
 
-  const searchRaw = searchTerm ? searchTerm.trim() : "";
-  const searchLower = searchRaw.toLowerCase();
-  const phoneQuery = searchRaw.replace(/\s+/g, "");
+  // POST FILTER PATH
+  const searchLower = (searchTerm || "").toLowerCase();
+  const phoneQuery = (searchTerm || "").replace(/\s+/g, "");
 
-  const indicesToScan = candidateSet
-    ? Array.from(candidateSet).sort(
-        (a, b) => positionLookup[a] - positionLookup[b]
-      )
+  const toScan = candidate
+    ? [...candidate].sort((a, b) => positionLookup[a] - positionLookup[b])
     : sortedIndices;
 
-  const items = [];
-  let matchedCount = 0;
+  const result = [];
+  let matched = 0;
 
-  for (let idx = 0; idx < indicesToScan.length; idx += 1) {
-    const recordIndex = indicesToScan[idx];
-    const entry = dataset[recordIndex];
+  for (const idx of toScan) {
+    const rec = dataset[idx];
 
-    if (!recordPassesPostFilters(entry, searchLower, phoneQuery, filters)) {
+    if (!recordMatchesPostFilter(rec, searchLower, phoneQuery, filters))
       continue;
-    }
 
-    if (matchedCount >= offset && items.length < limit) {
-      items.push(entry);
-    }
+    if (matched >= offset && result.length < limit) result.push(rec);
 
-    matchedCount += 1;
-
-    if (items.length === limit && matchedCount >= offset + limit) {
-      break;
-    }
+    matched++;
   }
 
   return {
     page,
     limit,
-    total: matchedCount,
-    totalPages: Math.max(1, Math.ceil(matchedCount / limit) || 1),
-    items,
+    total: matched,
+    totalPages: Math.ceil(matched / limit),
+    items: result,
   };
-};
+}
 
-const getSalesMeta = () => {
-  const { indexes } = getSalesStore();
-  const serialize = (map) => Array.from(map.keys()).filter(Boolean).sort();
-
+function getSalesMeta({ indexes }) {
+  const serialize = (map) => [...map.keys()].sort();
   return {
     regions: serialize(indexes.region),
     genders: serialize(indexes.gender),
@@ -281,9 +172,6 @@ const getSalesMeta = () => {
     paymentMethods: serialize(indexes.paymentMethod),
     tags: serialize(indexes.tags),
   };
-};
+}
 
-module.exports = {
-  getSales,
-  getSalesMeta,
-};
+module.exports = { getSales, getSalesMeta };
